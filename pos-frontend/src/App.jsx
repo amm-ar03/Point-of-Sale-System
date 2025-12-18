@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ProductLookup from "./ProductLookup.jsx";
 
 function App() {
   const [products, setProducts] = useState([]);
@@ -12,6 +13,13 @@ function App() {
   const [skuSearch, setSkuSearch] = useState("");
   const [cartItems, setCartItems] = useState([]);
   const [newTaxExempt, setNewTaxExempt] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [showItemDialog, setShowItemDialog] = useState(false);
+  const [dialogSku, setDialogSku] = useState("");
+  const [dialogProduct, setDialogProduct] = useState(null);
+  const [dialogQuantity, setDialogQuantity] = useState(1);
+  const [dialogPrice, setDialogPrice] = useState("");
+
 
 
 
@@ -192,6 +200,114 @@ function App() {
   }
 }
 
+async function loadOrders() {
+  try {
+    const res = await fetch("http://localhost:8080/api/orders");
+    if (!res.ok) {
+      throw new Error(`HTTP error ${res.status}`);
+    }
+    const data = await res.json();
+    setOrders(data);
+  } catch (err) {
+    console.error("Failed to load orders:", err);
+  }
+}
+
+async function handleDialogSearch() {
+  const term = dialogSku.trim();
+  if (!term) return;
+
+  try {
+    let product = null;
+
+    // Try backend SKU lookup first
+    const bySkuRes = await fetch(
+      `http://localhost:8080/api/products/sku/${encodeURIComponent(term)}`
+    );
+    if (bySkuRes.ok) {
+      product = await bySkuRes.json();
+    } else {
+      // Fallback: search in loaded products by name or SKU
+      const lower = term.toLowerCase();
+      product = products.find(
+        (p) =>
+          p.name.toLowerCase().includes(lower) ||
+          (p.sku && p.sku.toLowerCase().includes(lower))
+      );
+    }
+
+    if (!product) {
+      alert("No product found");
+      setDialogProduct(null);
+      return;
+    }
+
+    setDialogProduct(product);
+    setDialogPrice(String(product.price ?? ""));
+    setDialogQuantity(1);
+  } catch (err) {
+    console.error("Dialog search error:", err);
+    alert("Error searching product");
+  }
+}
+
+function handleDialogAdd() {
+  if (!dialogProduct) return;
+
+  const priceToUse =
+    dialogPrice.trim() === ""
+      ? dialogProduct.price
+      : Number(dialogPrice);
+
+  if (!priceToUse || dialogQuantity <= 0) {
+    alert("Invalid quantity or price");
+    return;
+  }
+
+  const stock = dialogProduct.stockQuantity ?? 0;
+
+  // If product is already in cart, include its existing quantity
+  const existingInCart = cartItems.find((i) => i.id === dialogProduct.id);
+  const existingQty = existingInCart ? existingInCart.quantity : 0;
+  const requestedTotalQty = existingQty + dialogQuantity;
+
+  if (requestedTotalQty > stock) {
+    alert(
+      `Not enough stock. On hand: ${stock}, requested total in cart: ${requestedTotalQty}`
+    );
+    return;
+  }
+
+  setCartItems((prev) => {
+    const existing = prev.find((item) => item.id === dialogProduct.id);
+    if (existing) {
+      return prev.map((item) =>
+        item.id === dialogProduct.id
+          ? {
+              ...item,
+              quantity: item.quantity + dialogQuantity,
+              // decide whether to override price when merging
+              price: priceToUse,
+            }
+          : item
+      );
+    }
+    return [
+      ...prev,
+      {
+        id: dialogProduct.id,
+        name: dialogProduct.name,
+        sku: dialogProduct.sku,
+        price: priceToUse,
+        quantity: dialogQuantity,
+        taxExempt: dialogProduct.taxExempt || false,
+      },
+    ];
+  });
+
+  setShowItemDialog(false);
+}
+
   const netTotal = cartItems.reduce(
   (sum, item) => sum + item.price * item.quantity,
   0
@@ -262,17 +378,31 @@ function App() {
                     </button>
                     <button
                       onClick={() =>
-                        setCartItems((prev) =>
-                          prev.map((i) =>
-                            i.id === item.id
-                              ? { ...i, quantity: i.quantity + 1 }
-                              : i
-                          )
-                        )
+                        setCartItems((prev) => {
+                          // Find current product in products list to know stock
+                          const product = products.find((p) => p.id === item.id);
+                          const stock = product?.stockQuantity ?? 0;
+
+                          return prev.map((i) => {
+                            if (i.id !== item.id) return i;
+
+                            if (i.quantity + 1 > stock) {
+                              alert(
+                                `Not enough stock for ${i.name}. On hand: ${stock}, requested: ${
+                                  i.quantity + 1
+                                }`
+                              );
+                              return i;
+                            }
+
+                            return { ...i, quantity: i.quantity + 1 };
+                          });
+                        })
                       }
                     >
                       +
                     </button>
+
                     <button
                       onClick={() =>
                         setCartItems((prev) =>
@@ -308,6 +438,12 @@ function App() {
           <button onClick={handlePay}>
                       Pay
                     </button>
+          <button onClick={() => setCartItems([])}>
+                      New Sale
+                    </button>
+          <button onClick={() => setCartItems([])}>
+                      Void
+                    </button>
       </div>
 
       {/* SKU search */}
@@ -323,6 +459,19 @@ function App() {
           />
           <button type="submit">Find</button>
         </form>
+        <button
+          type="button"
+          style={{ marginTop: "0.5rem" }}
+          onClick={() => {
+            setShowItemDialog(true);
+            setDialogSku("");
+            setDialogProduct(null);
+            setDialogQuantity(1);
+            setDialogPrice("");
+          }}
+        >
+          Open Product Lookup
+        </button>
       </div>
 
       {/* Add product form */}
@@ -429,8 +578,55 @@ function App() {
             </tr>
           ))}
         </tbody>
-      </table>
+          </table>
+        <h2>Orders</h2>
+        <button onClick={loadOrders}>Refresh Orders</button>
+        <table border="1" cellPadding="8">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Date/Time</th>
+              <th>Net</th>
+              <th>Tax</th>
+              <th>Total</th>
+              <th>Items</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.length === 0 ? (
+              <tr>
+                <td colSpan={6}>No orders yet.</td>
+              </tr>
+            ) : (
+              orders.map((o) => (
+                <tr key={o.id}>
+                  <td>{o.id}</td>
+                  <td>{o.createdAt}</td>
+                  <td>{o.netTotal?.toFixed(2)}</td>
+                  <td>{o.taxAmount?.toFixed(2)}</td>
+                  <td>{o.grandTotal?.toFixed(2)}</td>
+                  <td>{o.items ? o.items.length : 0}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+        <ProductLookup
+            open={showItemDialog}
+            onClose={() => setShowItemDialog(false)}
+            onSearch={handleDialogSearch}
+            onAdd={handleDialogAdd}
+            skuValue={dialogSku}
+            setSkuValue={setDialogSku}
+            product={dialogProduct}
+            quantity={dialogQuantity}
+            setQuantity={setDialogQuantity}
+            price={dialogPrice}
+            setPrice={setDialogPrice}
+        />
+
     </div>
+    
   );
 }
 
