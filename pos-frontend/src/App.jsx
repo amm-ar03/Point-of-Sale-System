@@ -1,633 +1,262 @@
 import { useEffect, useState } from "react";
 import ProductLookup from "./ProductLookup.jsx";
+import PaymentDialog from "./PaymentDialog.jsx";
+import { money } from "./utils/money";
+import { useCart } from "./hooks/useCarts";
+import * as productsApi from "./api/products";
+import * as ordersApi from "./api/orders";
+import { getConfig } from "./api/config";
+import "./App.css";
 
-function App() {
+export default function App() {
+  const [tab, setTab] = useState("pos");
   const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newPrice, setNewPrice] = useState("");
-  const [newStock, setNewStock] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [skuInput, setSkuInput] = useState("");
-  const [skuSearch, setSkuSearch] = useState("");
-  const [cartItems, setCartItems] = useState([]);
-  const [newTaxExempt, setNewTaxExempt] = useState(false);
   const [orders, setOrders] = useState([]);
-  const [showItemDialog, setShowItemDialog] = useState(false);
-  const [dialogSku, setDialogSku] = useState("");
-  const [dialogProduct, setDialogProduct] = useState(null);
-  const [dialogQuantity, setDialogQuantity] = useState(1);
-  const [dialogPrice, setDialogPrice] = useState("");
+  const [taxRate, setTaxRate] = useState(0);
+  const [status, setStatus] = useState({ type: "", msg: "" });
+  const [loading, setLoading] = useState(true);
 
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [lookup, setLookup] = useState({ sku: "", product: null, qty: 1, price: "" });
+  const [payOpen, setPayOpen] = useState(false);
+  const [skuSearch, setSkuSearch] = useState("");
+  const [form, setForm] = useState({ name: "", sku: "", price: "", stock: "", taxExempt: false });
 
+  const notify = (msg, type = "error") => setStatus({ type, msg });
+  const stockOf = (id) => products.find((p) => p.id === id)?.stockQuantity ?? 0;
 
+  const { cart, selected, setSelected, totals, addItem, changeQty, removeItem, clear, toOrderItems } =
+    useCart(taxRate, stockOf);
 
-  const taxRate = 0.07; // 7% sales tax
+  const addToCart = (product, qty, price) => {
+    const err = addItem(product, qty, price);
+    notify(err ?? "", err ? "error" : "");
+  };
+
   useEffect(() => {
-    async function fetchProducts() {
+    (async () => {
       try {
-        const response = await fetch("http://localhost:8080/api/products");
-        if (!response.ok) {
-          throw new Error(`HTTP error ${response.status}`);
-        }
-        const data = await response.json();
-        setProducts(data);
-      } catch (err) {
-        setError(err.message || "Failed to load products");
+        const [p, c] = await Promise.all([productsApi.getProducts(), getConfig()]);
+        setProducts(p);
+        setTaxRate(c.taxRate ?? 0);
+      } catch (e) {
+        notify(`Failed to load: ${e.message}`);
       } finally {
         setLoading(false);
       }
-    }
-
-    fetchProducts();
+    })();
   }, []);
 
-  if (loading) {
-    return <div style={{ padding: "1rem" }}>Loading products...</div>;
-  }
-
-  if (error) {
-    return <div style={{ padding: "1rem", color: "red" }}>Error: {error}</div>;
-  }
-
-  
-  async function handleAddProduct(e) {
-  e.preventDefault();
-  setSaving(true);
-
-  try {
-    const response = await fetch("http://localhost:8080/api/products", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: newName,
-        sku: skuInput,
-        price: Number(newPrice),
-        stockQuantity: Number(newStock),
-        taxExempt: newTaxExempt,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error ${response.status}`);
-    }
-
-    const created = await response.json();
-
-    // add new product to the list
-    setProducts((prev) => [...prev, created]);
-
-    // clear form
-    setNewName("");
-    setNewPrice("");
-    setNewStock("");
-    setSkuInput("");
-    setNewTaxExempt(false);
-  } catch (err) {
-    console.error("Failed to add product:", err);
-    setError(err.message || "Failed to add product");
-  } finally {
-    setSaving(false);
-  }
-}
-
-  function handleAddToCart(product) {
-    setCartItems((prev) => {
-      const existing = prev.find((item) => item.id === product.id);
-      if (existing) {
-        // increment quantity
-        return prev.map((item) =>
-          item.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        );
-      }
-      // new cart item
-      return [
-        ...prev,
-        {
-          id: product.id,
-          name: product.name,
-          sku: product.sku,
-          price: product.price,
-          quantity: 1,
-          taxExempt: product.taxExempt || false,
-        },
-      ];
-    });
-  }
-
-  async function handleDeleteProduct(id) {
-  try {
-    const response = await fetch(`http://localhost:8080/api/products/${id}`, {
-      method: "DELETE",
-    });
-    if (!response.ok && response.status !== 204) {
-      throw new Error(`HTTP error ${response.status}`);
-    }
-
-    // remove from state
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-  } catch (err) {
-    console.error("Failed to delete product:", err);
-    setError(err.message || "Failed to delete product");
-  }
-}
-
-  async function handleFindBySku(e) {
+  async function handleSkuSubmit(e) {
     e.preventDefault();
-
-    if (!skuSearch.trim()) return;
-
+    const term = skuSearch.trim();
+    if (!term) return;
     try {
-      const res = await fetch(
-        `http://localhost:8080/api/products/sku/${encodeURIComponent(skuSearch.trim())}`
-      );
-
-      if (!res.ok) {
-        alert("Product not found");
-        return;
-      }
-
-      const product = await res.json();
-      // For now just add it to cart (or you can console.log / alert)
-      handleAddToCart(product);
+      addToCart(await productsApi.getProductBySku(term));
       setSkuSearch("");
-    } catch (err) {
-      console.error("Error finding product by SKU:", err);
-      alert("Error finding product");
+    } catch {
+      notify(`Product not found: ${term}`);
     }
   }
 
-  async function handlePay() {
-  if (cartItems.length === 0) {
-    alert("Cart is empty");
-    return;
-  }
-
-  // Build request body from cart
-  const items = cartItems.map((item) => ({
-    productId: item.id,
-    quantity: item.quantity,
-    unitPrice: item.price,
-    taxExempt: item.taxExempt || false,
-  }));
-
-  try {
-    const res = await fetch("http://localhost:8080/api/orders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      alert("Order failed: " + text);
-      return;
+  async function lookupSearch() {
+    const term = lookup.sku.trim();
+    if (!term) return;
+    let found = null;
+    try {
+      found = await productsApi.getProductBySku(term);
+    } catch {
+      const t = term.toLowerCase();
+      found = products.find((p) => p.name.toLowerCase().includes(t) || p.sku?.toLowerCase().includes(t)) ?? null;
     }
-
-    const savedOrder = await res.json();
-    console.log("Saved order:", savedOrder);
-
-    alert(`Sale completed. Order #${savedOrder.id}, total ${savedOrder.grandTotal.toFixed(2)}`);
-
-    // Clear cart
-    setCartItems([]);
-  } catch (err) {
-    console.error("Pay error:", err);
-    alert("Error completing sale");
+    if (!found) notify("No product found");
+    setLookup((l) => ({ ...l, product: found, qty: 1, price: found ? String(found.price) : "" }));
   }
-}
 
-async function loadOrders() {
-  try {
-    const res = await fetch("http://localhost:8080/api/orders");
-    if (!res.ok) {
-      throw new Error(`HTTP error ${res.status}`);
+  function lookupAdd() {
+    const { product, qty, price } = lookup;
+    if (!product) return;
+    const unit = price.trim() ? Number(price) : product.price;
+    if (!Number.isInteger(qty) || qty <= 0 || !(unit >= 0)) return notify("Invalid quantity or price");
+    addToCart(product, qty, unit);
+    setLookupOpen(false);
+  }
+
+  const handleQty = (id, delta) => {
+    const err = changeQty(id, delta);
+    if (err) notify(err);
+  };
+
+  async function completeSale() {
+    try {
+      const order = await ordersApi.createOrder(toOrderItems());
+      clear();
+      setPayOpen(false);
+      notify(`Sale completed. Order #${order.id}, total ${money(order.grandTotal)}`, "ok");
+      setProducts(await productsApi.getProducts());
+    } catch (e) {
+      notify(`Order failed: ${e.message}`);
     }
-    const data = await res.json();
-    setOrders(data);
-  } catch (err) {
-    console.error("Failed to load orders:", err);
   }
-}
 
-async function handleDialogSearch() {
-  const term = dialogSku.trim();
-  if (!term) return;
-
-  try {
-    let product = null;
-
-    // Try backend SKU lookup first
-    const bySkuRes = await fetch(
-      `http://localhost:8080/api/products/sku/${encodeURIComponent(term)}`
-    );
-    if (bySkuRes.ok) {
-      product = await bySkuRes.json();
-    } else {
-      // Fallback: search in loaded products by name or SKU
-      const lower = term.toLowerCase();
-      product = products.find(
-        (p) =>
-          p.name.toLowerCase().includes(lower) ||
-          (p.sku && p.sku.toLowerCase().includes(lower))
-      );
+  async function addProduct(e) {
+    e.preventDefault();
+    try {
+      const created = await productsApi.createProduct({
+        name: form.name, sku: form.sku, price: Number(form.price),
+        stockQuantity: Number(form.stock), taxExempt: form.taxExempt,
+      });
+      setProducts((p) => [...p.filter((x) => x.id !== created.id), created]);
+      setForm({ name: "", sku: "", price: "", stock: "", taxExempt: false });
+      notify("Product saved", "ok");
+    } catch (e2) {
+      notify(e2.message);
     }
+  }
 
-    if (!product) {
-      alert("No product found");
-      setDialogProduct(null);
-      return;
+  async function deleteProduct(id) {
+    try {
+      await productsApi.deleteProduct(id);
+      setProducts((p) => p.filter((x) => x.id !== id));
+    } catch (e) {
+      notify(e.message);
     }
-
-    setDialogProduct(product);
-    setDialogPrice(String(product.price ?? ""));
-    setDialogQuantity(1);
-  } catch (err) {
-    console.error("Dialog search error:", err);
-    alert("Error searching product");
-  }
-}
-
-function handleDialogAdd() {
-  if (!dialogProduct) return;
-
-  const priceToUse =
-    dialogPrice.trim() === ""
-      ? dialogProduct.price
-      : Number(dialogPrice);
-
-  if (!priceToUse || dialogQuantity <= 0) {
-    alert("Invalid quantity or price");
-    return;
   }
 
-  const stock = dialogProduct.stockQuantity ?? 0;
-
-  // If product is already in cart, include its existing quantity
-  const existingInCart = cartItems.find((i) => i.id === dialogProduct.id);
-  const existingQty = existingInCart ? existingInCart.quantity : 0;
-  const requestedTotalQty = existingQty + dialogQuantity;
-
-  if (requestedTotalQty > stock) {
-    alert(
-      `Not enough stock. On hand: ${stock}, requested total in cart: ${requestedTotalQty}`
-    );
-    return;
+  async function loadOrders() {
+    try { setOrders(await ordersApi.getOrders()); } catch (e) { notify(e.message); }
   }
 
-  setCartItems((prev) => {
-    const existing = prev.find((item) => item.id === dialogProduct.id);
-    if (existing) {
-      return prev.map((item) =>
-        item.id === dialogProduct.id
-          ? {
-              ...item,
-              quantity: item.quantity + dialogQuantity,
-              // decide whether to override price when merging
-              price: priceToUse,
-            }
-          : item
-      );
-    }
-    return [
-      ...prev,
-      {
-        id: dialogProduct.id,
-        name: dialogProduct.name,
-        sku: dialogProduct.sku,
-        price: priceToUse,
-        quantity: dialogQuantity,
-        taxExempt: dialogProduct.taxExempt || false,
-      },
-    ];
-  });
-
-  setShowItemDialog(false);
-}
-
-  const netTotal = cartItems.reduce(
-  (sum, item) => sum + item.price * item.quantity,
-  0
-  );
-
-  const taxableTotal = cartItems.reduce(
-    (sum, item) => (item.taxExempt ? sum : sum + item.price * item.quantity),
-    0
-  );
-
-  const taxAmount = taxableTotal * taxRate;
-  const grandTotal = netTotal + taxAmount;
+  // ...loading check and return (...) JSX below
 
 
 
+  if (loading) return <div className="loading">Loading…</div>;
 
   return (
-    <div style={{ padding: "1rem" }}>
-      <h1>Products</h1>
+    <div className="app">
+      <nav className="menubar">
+        <button className={tab === "pos" ? "on" : ""} onClick={() => setTab("pos")}>POS</button>
+        <button className={tab === "stock" ? "on" : ""} onClick={() => setTab("stock")}>Stock</button>
+        <button className={tab === "orders" ? "on" : ""} onClick={() => { setTab("orders"); loadOrders(); }}>Orders</button>
+      </nav>
 
-      {error && (
-        <div style={{ color: "red", marginBottom: "0.5rem" }}>
-          Error: {error}
+      {status.msg && (
+        <div className={`status ${status.type}`}>
+          {status.msg} <button onClick={() => notify("", "")}>×</button>
         </div>
       )}
 
-      {/* Cart */}
-      <div style={{ marginBottom: "1rem" }}>
-        <h2>Cart</h2>
-        {cartItems.length === 0 ? (
-          <p>No items in cart.</p>
-        ) : (
-          <table border="1" cellPadding="8">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>SKU</th>
-                <th>Product</th>
-                <th>Quantity</th>
-                <th>Price</th>
-                <th>Row total</th>
-                <th>Actions</th>
-                
-              </tr>
-            </thead>
-            <tbody>
-              {cartItems.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.id}</td>
-                  <td>{item.name}</td>
-                  <td>{item.sku}</td>
-                  <td>{item.quantity}</td>
-                  <td>{item.price}</td>
-                  <td>{(item.price * item.quantity).toFixed(2)}</td>
-                  <td>
-                    <button
-                      onClick={() =>
-                        setCartItems((prev) =>
-                          prev.map((i) =>
-                            i.id === item.id && i.quantity > 1
-                              ? { ...i, quantity: i.quantity - 1 }
-                              : i
-                          )
-                        )
-                      }
-                    >
-                      -
-                    </button>
-                    <button
-                      onClick={() =>
-                        setCartItems((prev) => {
-                          // Find current product in products list to know stock
-                          const product = products.find((p) => p.id === item.id);
-                          const stock = product?.stockQuantity ?? 0;
+      {tab === "pos" && (
+        <section className="screen">
+          <header className="panel head">
+            <div className="field"><label>Store</label><div className="box">01 / Demonstration System</div></div>
+            <div className="mode">CASH SALE<small>Till : 00</small></div>
+            <div className="due"><span>DUE</span><strong>{money(totals.grand)}</strong></div>
+          </header>
 
-                          return prev.map((i) => {
-                            if (i.id !== item.id) return i;
+          <form className="panel skubar" onSubmit={handleSkuSubmit}>
+            <label>SKU</label>
+            <input autoFocus value={skuSearch} onChange={(e) => setSkuSearch(e.target.value)} placeholder="Scan or type SKU, press Enter" />
+            <button type="submit">Find</button>
+          </form>
 
-                            if (i.quantity + 1 > stock) {
-                              alert(
-                                `Not enough stock for ${i.name}. On hand: ${stock}, requested: ${
-                                  i.quantity + 1
-                                }`
-                              );
-                              return i;
-                            }
-
-                            return { ...i, quantity: i.quantity + 1 };
-                          });
-                        })
-                      }
-                    >
-                      +
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        setCartItems((prev) =>
-                          prev.filter((i) => i.id !== item.id)
-                        )
-                      }
-                    >
-                      Remove
-                    </button>
-                  
-
-                  </td>
-                    
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          
-        )}
-      </div>
-
-      {/* Totals */}
-      <div style={{ marginTop: "1rem", textAlign: "right" }}>
-        <div>
-          <strong>Net Total:</strong> ${netTotal.toFixed(2)}
-        </div>
-        <div>
-          <strong>Tax ({(taxRate * 100).toFixed(0)}%):</strong> ${taxAmount.toFixed(2)}
-        </div>
-        <div style={{ fontSize: "1.25rem", fontWeight: "bold" }}>
-          <strong>Total:</strong> ${grandTotal.toFixed(2)}
-        </div>
-          <button onClick={handlePay}>
-                      Pay
-                    </button>
-          <button onClick={() => setCartItems([])}>
-                      New Sale
-                    </button>
-          <button onClick={() => setCartItems([])}>
-                      Void
-                    </button>
-      </div>
-
-      {/* SKU search */}
-      <div style={{ marginBottom: "1rem" }}>
-        <h2>Scan / Enter SKU</h2>
-        <form onSubmit={handleFindBySku}>
-          <input
-            type="text"
-            placeholder="Enter SKU"
-            value={skuSearch}
-            onChange={(e) => setSkuSearch(e.target.value)}
-            required
-          />
-          <button type="submit">Find</button>
-        </form>
-        <button
-          type="button"
-          style={{ marginTop: "0.5rem" }}
-          onClick={() => {
-            setShowItemDialog(true);
-            setDialogSku("");
-            setDialogProduct(null);
-            setDialogQuantity(1);
-            setDialogPrice("");
-          }}
-        >
-          Open Product Lookup
-        </button>
-      </div>
-
-      {/* Add product form */}
-      <div style={{ marginBottom: "1rem" }}>
-        <h2>Add Product</h2>
-        <form onSubmit={handleAddProduct}>
-          <div>
-            <label>
-              Name:{" "}
-              <input
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                required
-              />
-            </label>
-          </div>
-          <div>
-            <label>
-              Price:{" "}
-              <input
-                type="number"
-                step="0.01"
-                value={newPrice}
-                onChange={(e) => setNewPrice(e.target.value)}
-                required
-              />
-            </label>
-          </div>
-          <div>
-            <label>
-              SKU:{" "}
-              <input
-                type="text"
-                value={skuInput}
-                onChange={(e) => setSkuInput(e.target.value)}
-                required
-              />
-            </label>
-          </div>
-          <div>
-            <label>
-              Stock:{" "}
-              <input
-                type="number"
-                value={newStock}
-                onChange={(e) => setNewStock(e.target.value)}
-                required
-              />
-            </label>
-          </div>
-          <div>
-            <label>
-              <input
-                type="checkbox"
-                checked={newTaxExempt}
-                onChange={(e) => setNewTaxExempt(e.target.checked)}
-              />
-              {" "}Tax Exempt
-            </label>
+          <div className="grid-wrap">
+            <table className="grid">
+              <thead>
+                <tr><th>Line</th><th>Code</th><th>Description</th><th className="r">Quantity</th><th className="r">Price</th><th className="r">Discount</th><th className="r">Total</th></tr>
+              </thead>
+              <tbody>
+                {cart.map((i, idx) => (
+                  <tr key={i.id} className={selected === i.id ? "sel" : ""} onClick={() => setSelected(i.id)}>
+                    <td>{idx + 1}</td><td>{i.sku}</td><td>{i.name}</td>
+                    <td className="r">{money(i.quantity)}</td>
+                    <td className="r">{money(i.price)}</td>
+                    <td className="r">0.00</td>
+                    <td className="r">{money(i.price * i.quantity)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
-          <button type="submit" disabled={saving}>
-            {saving ? "Saving..." : "Add Product"}
-          </button>
-        </form>
-      </div>
+          <footer className="bottom">
+            <div className="btns">
+              <button onClick={() => { setLookup({ sku: "", product: null, qty: 1, price: "" }); setLookupOpen(true); }}><u>I</u>nsert</button>
+              <button disabled={!selected} onClick={() => handleQty(selected, 1)}>Qty +</button>
+              <button disabled={!selected} onClick={() => handleQty(selected, -1)}>Qty −</button>
+              <button disabled={!selected} onClick={() => removeItem(selected)}><u>D</u>elete</button>
+              <button onClick={clear}>Cancel</button>
+              <button className="update" disabled={!cart.length} onClick={() => setPayOpen(true)}>Pay</button>
+            </div>
+            <div className="sums">
+              <div className="mini"><span>Lines</span><b>{totals.lines}</b><span>Qty</span><b>{money(totals.qty)}</b></div>
+              <div className="mini big">
+                <span>Sub Total</span><b>{money(totals.net)}</b>
+                <span>VAT {(taxRate * 100).toFixed(0)}%</span><b>{money(totals.tax)}</b>
+                <span>Total</span><b>{money(totals.grand)}</b>
+              </div>
+            </div>
+          </footer>
+        </section>
+      )}
 
-      {/* Products table */}
-      <table border="1" cellPadding="8">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Name</th>
-            <th>SKU</th>
-            <th>Price</th>
-            <th>Stock Qty</th>
-            <th>Delete</th>
-            <th>Add to cart</th>
-            <th>Tax Exempt</th>
-          </tr>
-        </thead>
-        <tbody>
-          {products.map((p) => (
-            <tr key={p.id}>
-              <td>{p.id}</td>
-              <td>{p.name}</td>
-              <td>{p.sku}</td>
-              <td>{p.price}</td>
-              <td>{p.stockQuantity}</td>
-              <td>
-                <button onClick={() => handleDeleteProduct(p.id)}>
-                  Delete
-                </button>
-              </td>
-              <td>
-                <button onClick={() => handleAddToCart(p)}>
-                  Add to cart
-                </button>
-              </td>
-              <td>{p.taxExempt ? "Yes" : "No"}
+      {tab === "stock" && (
+        <section className="screen">
+          <form className="panel formrow" onSubmit={addProduct}>
+            <input placeholder="Name" value={form.name} required onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <input placeholder="SKU" value={form.sku} required onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+            <input type="number" step="0.01" placeholder="Price" value={form.price} required onChange={(e) => setForm({ ...form, price: e.target.value })} />
+            <input type="number" placeholder="Stock" value={form.stock} required onChange={(e) => setForm({ ...form, stock: e.target.value })} />
+            <label className="chk"><input type="checkbox" checked={form.taxExempt} onChange={(e) => setForm({ ...form, taxExempt: e.target.checked })} /> Tax exempt</label>
+            <button type="submit">Add Product</button>
+          </form>
+          <div className="grid-wrap">
+            <table className="grid">
+              <thead><tr><th>ID</th><th>SKU</th><th>Name</th><th className="r">Price</th><th className="r">Stock</th><th>Tax</th><th></th></tr></thead>
+              <tbody>
+                {products.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.id}</td><td>{p.sku}</td><td>{p.name}</td>
+                    <td className="r">{money(p.price)}</td><td className="r">{p.stockQuantity}</td>
+                    <td>{p.taxExempt ? "Exempt" : "Yes"}</td>
+                    <td><button onClick={() => addToCart(p)}>Add to sale</button> <button onClick={() => deleteProduct(p.id)}>Delete</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
-              </td>
-            </tr>
-          ))}
-        </tbody>
-          </table>
-        <h2>Orders</h2>
-        <button onClick={loadOrders}>Refresh Orders</button>
-        <table border="1" cellPadding="8">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Date/Time</th>
-              <th>Net</th>
-              <th>Tax</th>
-              <th>Total</th>
-              <th>Items</th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.length === 0 ? (
-              <tr>
-                <td colSpan={6}>No orders yet.</td>
-              </tr>
-            ) : (
-              orders.map((o) => (
-                <tr key={o.id}>
-                  <td>{o.id}</td>
-                  <td>{o.createdAt}</td>
-                  <td>{o.netTotal?.toFixed(2)}</td>
-                  <td>{o.taxAmount?.toFixed(2)}</td>
-                  <td>{o.grandTotal?.toFixed(2)}</td>
-                  <td>{o.items ? o.items.length : 0}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-        <ProductLookup
-            open={showItemDialog}
-            onClose={() => setShowItemDialog(false)}
-            onSearch={handleDialogSearch}
-            onAdd={handleDialogAdd}
-            skuValue={dialogSku}
-            setSkuValue={setDialogSku}
-            product={dialogProduct}
-            quantity={dialogQuantity}
-            setQuantity={setDialogQuantity}
-            price={dialogPrice}
-            setPrice={setDialogPrice}
-        />
+      {tab === "orders" && (
+        <section className="screen">
+          <div className="grid-wrap">
+            <table className="grid">
+              <thead><tr><th>ID</th><th>Date</th><th className="r">Net</th><th className="r">Tax</th><th className="r">Total</th><th className="r">Items</th></tr></thead>
+              <tbody>
+                {orders.length === 0 && <tr><td colSpan={6}>No orders yet.</td></tr>}
+                {orders.map((o) => (
+                  <tr key={o.id}>
+                    <td>{o.id}</td><td>{o.createdAt}</td>
+                    <td className="r">{money(o.netTotal)}</td><td className="r">{money(o.taxAmount)}</td>
+                    <td className="r">{money(o.grandTotal)}</td><td className="r">{o.items?.length ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
+      <ProductLookup
+        open={lookupOpen} onClose={() => setLookupOpen(false)} onSearch={lookupSearch} onAdd={lookupAdd}
+        skuValue={lookup.sku} setSkuValue={(v) => setLookup((l) => ({ ...l, sku: v }))}
+        product={lookup.product}
+        quantity={lookup.qty} setQuantity={(v) => setLookup((l) => ({ ...l, qty: v }))}
+        price={lookup.price} setPrice={(v) => setLookup((l) => ({ ...l, price: v }))}
+      />
+      <PaymentDialog open={payOpen} amountDue={totals.grand} onClose={() => setPayOpen(false)} onConfirm={completeSale} />
     </div>
-    
   );
 }
-
-export default App;
