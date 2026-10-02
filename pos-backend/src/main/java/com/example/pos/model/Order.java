@@ -1,5 +1,6 @@
 package com.example.pos.model;
 
+import java.math.BigDecimal;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -15,9 +16,9 @@ public class Order {
 
     private LocalDateTime createdAt;
 
-    private Double netTotal;
-    private Double taxAmount;
-    private Double grandTotal;
+    private BigDecimal netTotal;
+    private BigDecimal taxAmount;
+    private BigDecimal grandTotal;
 
     private String status; // e.g. "PAID"
 
@@ -43,27 +44,27 @@ public class Order {
         this.createdAt = createdAt;
     }
 
-    public Double getNetTotal() {
+    public BigDecimal getNetTotal() {
         return netTotal;
     }
 
-    public void setNetTotal(Double netTotal) {
+    public void setNetTotal(BigDecimal netTotal) {
         this.netTotal = netTotal;
     }
 
-    public Double getTaxAmount() {
+    public BigDecimal getTaxAmount() {
         return taxAmount;
     }
 
-    public void setTaxAmount(Double taxAmount) {
+    public void setTaxAmount(BigDecimal taxAmount) {
         this.taxAmount = taxAmount;
     }
 
-    public Double getGrandTotal() {
+    public BigDecimal getGrandTotal() {
         return grandTotal;
     }
 
-    public void setGrandTotal(Double grandTotal) {
+    public void setGrandTotal(BigDecimal grandTotal) {
         this.grandTotal = grandTotal;
     }
 

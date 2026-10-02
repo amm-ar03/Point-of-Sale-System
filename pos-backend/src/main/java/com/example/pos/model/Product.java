@@ -1,9 +1,11 @@
 package com.example.pos.model;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import java.math.BigDecimal;
 
 @Entity
 public class Product {
@@ -13,15 +15,19 @@ public class Product {
     private Long id;
 
     private String name;
-    private Double price;
+    private BigDecimal price;
     private Integer stockQuantity;
+    @Column(unique = true, nullable = false)
     private String sku;
     private Boolean taxExempt = false;
+
+    // Soft delete: products that appear on past orders must never be removed from the database
+    private boolean active = true;
 
     public Product() {
     }
 
-    public Product(String name, Double price, Integer stockQuantity, String sku) {
+    public Product(String name, BigDecimal price, Integer stockQuantity, String sku) {
         this.name = name;
         this.price = price;
         this.stockQuantity = stockQuantity;
@@ -42,11 +48,11 @@ public class Product {
         this.name = name;
     }
 
-    public Double getPrice() {
+    public BigDecimal getPrice() {
         return price;
     }
 
-    public void setPrice(Double price) {
+    public void setPrice(BigDecimal price) {
         this.price = price;
     }
 
@@ -72,5 +78,13 @@ public class Product {
 
     public void setTaxExempt(Boolean taxExempt) {
         this.taxExempt = taxExempt;
+    }
+
+    public boolean isActive() {
+        return active;
+    }
+
+    public void setActive(boolean active) {
+        this.active = active;
     }
 }

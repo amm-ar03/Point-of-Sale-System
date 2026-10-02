@@ -1,5 +1,6 @@
 package com.example.pos.model;
 
+import java.math.BigDecimal;
 import jakarta.persistence.*;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 @Entity
@@ -21,19 +22,19 @@ public class OrderItem {
     private Product product;
 
     private Integer quantity;
-    private Double unitPrice;
-    private Double lineTotal;
+    private BigDecimal unitPrice;
+    private BigDecimal lineTotal;
     private Boolean taxExempt;
 
     public OrderItem() {
     }
 
-    public OrderItem(Product product, Integer quantity, Double unitPrice, Boolean taxExempt) {
+    public OrderItem(Product product, Integer quantity, BigDecimal unitPrice, Boolean taxExempt) {
         this.product = product;
         this.quantity = quantity;
         this.unitPrice = unitPrice;
         this.taxExempt = taxExempt;
-        this.lineTotal = unitPrice * quantity;
+        this.lineTotal = unitPrice.multiply(BigDecimal.valueOf(quantity.longValue()));
     }
 
     // getters and setters
@@ -65,26 +66,26 @@ public class OrderItem {
     public void setQuantity(Integer quantity) {
         this.quantity = quantity;
         if (unitPrice != null && quantity != null) {
-          this.lineTotal = unitPrice * quantity;
+          this.lineTotal = unitPrice.multiply(BigDecimal.valueOf(quantity.longValue()));
         }
     }
 
-    public Double getUnitPrice() {
+    public BigDecimal getUnitPrice() {
         return unitPrice;
     }
 
-    public void setUnitPrice(Double unitPrice) {
+    public void setUnitPrice(BigDecimal unitPrice) {
         this.unitPrice = unitPrice;
         if (unitPrice != null && quantity != null) {
-          this.lineTotal = unitPrice * quantity;
+          this.lineTotal = unitPrice.multiply(BigDecimal.valueOf(quantity.longValue()));
         }
     }
 
-    public Double getLineTotal() {
+    public BigDecimal getLineTotal() {
         return lineTotal;
     }
 
-    public void setLineTotal(Double lineTotal) {
+    public void setLineTotal(BigDecimal lineTotal) {
         this.lineTotal = lineTotal;
     }
 

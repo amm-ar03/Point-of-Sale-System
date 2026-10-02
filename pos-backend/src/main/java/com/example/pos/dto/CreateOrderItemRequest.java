@@ -1,10 +1,12 @@
 package com.example.pos.dto;
 
+import java.math.BigDecimal;
+
 public class CreateOrderItemRequest {
 
     private Long productId;
     private Integer quantity;
-    private Double unitPrice;
+    private BigDecimal unitPrice;
     private Boolean taxExempt;
 
     public CreateOrderItemRequest() {
@@ -26,11 +28,11 @@ public class CreateOrderItemRequest {
         this.quantity = quantity;
     }
 
-    public Double getUnitPrice() {
+    public BigDecimal getUnitPrice() {
         return unitPrice;
     }
 
-    public void setUnitPrice(Double unitPrice) {
+    public void setUnitPrice(BigDecimal unitPrice) {
         this.unitPrice = unitPrice;
     }
 
