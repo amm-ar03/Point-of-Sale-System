@@ -3,7 +3,7 @@ import { money } from "../../utils/money";
 
 export default function PosScreen({
   cart, selected, setSelected, totals, taxRate,
-  onSku, onInsert, onQty, onDelete, onCancel, onPay,
+  onSku, onNewSale, onInsert, onQty, onDelete, onCancel, onPay,
 }) {
   const [skuSearch, setSkuSearch] = useState("");
 
@@ -28,7 +28,7 @@ export default function PosScreen({
         <input autoFocus value={skuSearch} onChange={(e) => setSkuSearch(e.target.value)} placeholder="Scan or type SKU, press Enter" />
         <button type="submit">Find</button>
       </form>
-
+    
       <div className="grid-wrap">
         <table className="grid">
           <thead>
@@ -49,8 +49,13 @@ export default function PosScreen({
       </div>
 
       <footer className="bottom">
+        
+            
+            
         <div className="btns">
           <button onClick={onInsert}><u>I</u>nsert</button>
+          <button className="primary" onClick={onNewSale}>New Sale</button>
+        <button onClick={onInsert}><u>I</u>nsert</button>
           <button disabled={!selected} onClick={() => onQty(selected, 1)}>Qty +</button>
           <button disabled={!selected} onClick={() => onQty(selected, -1)}>Qty −</button>
           <button disabled={!selected} onClick={() => onDelete(selected)}><u>D</u>elete</button>

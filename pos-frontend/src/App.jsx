@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
-import ProductLookup from "./ProductLookup.jsx";
+import ItemSearchScreen from "./components/pos/itemsearch.jsx";
+import LoginScreen from "./components/LoginScreen.jsx";
+import HomeScreen from "./components/HomeScreen.jsx";
+import UsersScreen from "./components/UsersScreen.jsx";
+import { logout } from "./api/auth.js";
+import { useArrowNav } from "./hooks/nav.js";
 import PaymentDialog from "./PaymentDialog.jsx";
 import MenuBar from "./components/MenuBar.jsx";
 import StatusBar from "./components/StatusBar.jsx";
 import PosScreen from "./components/pos/PosScreen.jsx";
 import StockScreen from "./components/stock/StockScreen.jsx";
 import OrdersScreen from "./components/orders/OrdersScreen.jsx";
+import { useProducts } from "./hooks/useProducts.js";
 import { money } from "./utils/money";
 import { useCart } from "./hooks/useCarts";
 import * as productsApi from "./api/products";
@@ -13,38 +19,48 @@ import * as ordersApi from "./api/orders";
 import { getConfig } from "./api/config";
 import "./App.css";
 
-const EMPTY_LOOKUP = { sku: "", product: null, qty: 1, price: "" };
-
 export default function App() {
-  const [tab, setTab] = useState("pos");
-  const [products, setProducts] = useState([]);
+  const [tab, setTab] = useState("home");
+  
   const [orders, setOrders] = useState([]);
+  const [user, setUser] = useState(null);
   const [taxRate, setTaxRate] = useState(0);
   const [status, setStatus] = useState({ type: "", msg: "" });
   const [loading, setLoading] = useState(true);
-  const [lookupOpen, setLookupOpen] = useState(false);
-  const [lookup, setLookup] = useState(EMPTY_LOOKUP);
+  //const [lookupOpen, setLookupOpen] = useState(false);
+  //const [lookup, setLookup] = useState(EMPTY_LOOKUP);
+  const[searchOpen, setSearchOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
-
+  const arrowNav = useArrowNav();
   const notify = (msg, type = "error") => setStatus({ type, msg });
-  const stockOf = (id) => products.find((p) => p.id === id)?.stockQuantity ?? 0;
+  const { products, setProducts, refresh, stockOf, add: addProduct, remove: deleteProduct, search } =
+  useProducts(notify);
 
   const { cart, selected, setSelected, totals, addItem, changeQty, removeItem, clear, toOrderItems } =
     useCart(taxRate, stockOf);
 
   useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
         const [p, c] = await Promise.all([productsApi.getProducts(), getConfig()]);
+        if (cancelled) return;
         setProducts(p);
         setTaxRate(c.taxRate ?? 0);
+        notify("", "");
       } catch (e) {
-        notify(`Failed to load: ${e.message}`);
+        if (!cancelled) notify(`Failed to load: ${e.message}`);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, []);
+    return () => { cancelled = true; };
+}, [user]);
+
+// after all hooks, before the loading check:
+  if (!user) return <LoginScreen onLogin={setUser} />;
 
   function addToCart(product, qty, price) {
     const err = addItem(product, qty, price);
@@ -66,28 +82,33 @@ export default function App() {
     if (err) notify(err);
   }
 
-  async function lookupSearch() {
-    const term = lookup.sku.trim();
-    if (!term) return;
-    let found = null;
-    try {
-      found = await productsApi.getProductBySku(term);
-    } catch {
-      const t = term.toLowerCase();
-      found = products.find((p) => p.name.toLowerCase().includes(t) || p.sku?.toLowerCase().includes(t)) ?? null;
-    }
-    if (!found) notify("No product found");
-    setLookup((l) => ({ ...l, product: found, qty: 1, price: found ? String(found.price) : "" }));
-  }
+  function handleNewSale() {
+  if (cart.length && !window.confirm("Clear the current sale and start a new one?")) return;
+  clear();
+  notify("", "");
+  setSearchOpen(true);
+}
 
-  function lookupAdd() {
-    const { product, qty, price } = lookup;
-    if (!product) return;
-    const unit = price.trim() ? Number(price) : product.price;
-    if (!Number.isInteger(qty) || qty <= 0 || !(unit >= 0)) return notify("Invalid quantity or price");
-    addToCart(product, qty, unit);
-    setLookupOpen(false);
+function handleLogout() {
+  logout();
+  setUser(null);
+  clear();
+  setProducts([]);
+  setOrders([]);
+  setTab("home");
+}
+
+function handleGo(target) {
+  if (target === "newsale") {
+    setTab("pos");
+    handleNewSale();
+    return;
   }
+  handleTab(target);
+}
+function handleSearchAdd(product, qty, price) {
+  return addItem(product, qty, price);
+}
 
   async function completeSale() {
     try {
@@ -95,32 +116,12 @@ export default function App() {
       clear();
       setPayOpen(false);
       notify(`Sale completed. Order #${order.id}, total ${money(order.grandTotal)}`, "ok");
-      setProducts(await productsApi.getProducts());
+      setProducts(await refresh());
     } catch (e) {
       notify(`Order failed: ${e.message}`);
     }
   }
 
-  async function addProduct(payload) {
-    try {
-      const created = await productsApi.createProduct(payload);
-      setProducts((p) => [...p.filter((x) => x.id !== created.id), created]);
-      notify("Product saved", "ok");
-      return true;
-    } catch (e) {
-      notify(e.message);
-      return false;
-    }
-  }
-
-  async function deleteProduct(id) {
-    try {
-      await productsApi.deleteProduct(id);
-      setProducts((p) => p.filter((x) => x.id !== id));
-    } catch (e) {
-      notify(e.message);
-    }
-  }
 
   async function loadOrders() {
     try {
@@ -138,16 +139,21 @@ export default function App() {
   if (loading) return <div className="loading">Loading…</div>;
 
   return (
-    <div className="app">
-      <MenuBar tab={tab} onTab={handleTab} />
+    <div className="app" onKeyDown={arrowNav}>
+      
+      <MenuBar tab={tab} onTab={handleTab} user={user} onLogout={handleLogout} />
       <StatusBar status={status} onDismiss={() => notify("", "")} />
+
+      {tab === "home" && <HomeScreen user={user} onGo={handleGo} />}
+      {tab === "users" && user.role === "MASTER" && <UsersScreen notify={notify} currentUser={user} />}
 
       {tab === "pos" && (
         <PosScreen
           cart={cart} selected={selected} setSelected={setSelected}
           totals={totals} taxRate={taxRate}
           onSku={handleSku}
-          onInsert={() => { setLookup(EMPTY_LOOKUP); setLookupOpen(true); }}
+          onNewSale={handleNewSale}
+          onInsert={() => setSearchOpen(true)}
           onQty={handleQty}
           onDelete={removeItem}
           onCancel={clear}
@@ -164,13 +170,12 @@ export default function App() {
       )}
       {tab === "orders" && <OrdersScreen orders={orders} />}
 
-      <ProductLookup
-        open={lookupOpen} onClose={() => setLookupOpen(false)}
-        onSearch={lookupSearch} onAdd={lookupAdd}
-        skuValue={lookup.sku} setSkuValue={(v) => setLookup((l) => ({ ...l, sku: v }))}
-        product={lookup.product}
-        quantity={lookup.qty} setQuantity={(v) => setLookup((l) => ({ ...l, qty: v }))}
-        price={lookup.price} setPrice={(v) => setLookup((l) => ({ ...l, price: v }))}
+      <ItemSearchScreen
+        open={searchOpen}
+        products={products}
+        cart={cart}
+        onAdd={handleSearchAdd}
+        onClose={() => setSearchOpen(false)}
       />
       <PaymentDialog
         open={payOpen} amountDue={totals.grand}
