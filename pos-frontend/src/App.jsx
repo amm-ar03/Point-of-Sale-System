@@ -3,6 +3,12 @@ import ItemSearchScreen from "./components/pos/itemsearch.jsx";
 import LoginScreen from "./components/LoginScreen.jsx";
 import HomeScreen from "./components/HomeScreen.jsx";
 import UsersScreen from "./components/UsersScreen.jsx";
+import SaveDraftDialog from "./components/pos/SaveDraftDialog.jsx";
+import DraftsScreen from "./components/orders/DraftsScreen.jsx";
+import CustomersScreen from "./components/customers/CustomersScreen.jsx";
+import BusinessScreen from "./components/business/BusinessScreen.jsx";
+import CustomerPickerDialog from "./components/pos/CustomerPickerDialog.jsx";
+import * as customersApi from "./api/customers";
 import { logout } from "./api/auth.js";
 import { useArrowNav } from "./hooks/nav.js";
 import PaymentDialog from "./PaymentDialog.jsx";
@@ -17,6 +23,7 @@ import { useCart } from "./hooks/useCarts";
 import * as productsApi from "./api/products";
 import * as ordersApi from "./api/orders";
 import { getConfig } from "./api/config";
+import { login } from "./api/auth.js";
 import "./App.css";
 
 export default function App() {
@@ -27,9 +34,16 @@ export default function App() {
   const [taxRate, setTaxRate] = useState(0);
   const [status, setStatus] = useState({ type: "", msg: "" });
   const [loading, setLoading] = useState(true);
+  const [drafts, setDrafts] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [draftMeta, setDraftMeta] = useState(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [queue, setQueue] = useState([]);
+  const [saleCustomer, setSaleCustomer] = useState(null);
+  const [pickOpen, setPickOpen] = useState(false);
   //const [lookupOpen, setLookupOpen] = useState(false);
   //const [lookup, setLookup] = useState(EMPTY_LOOKUP);
-  const[searchOpen, setSearchOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const arrowNav = useArrowNav();
   const notify = (msg, type = "error") => setStatus({ type, msg });
@@ -39,16 +53,34 @@ export default function App() {
   const { cart, selected, setSelected, totals, addItem, changeQty, removeItem, clear, toOrderItems } =
     useCart(taxRate, stockOf);
 
+
+  useEffect(() => { login("master", "ChangeMe123!").then(setUser).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!queue.length) return;
+    const [next, ...rest] = queue;
+    const product = products.find((p) => p.id === next.productId);
+    if (!product) {
+      notify(`${next.name} no longer exists and was skipped`);
+    } else {
+      const price = Number(next.unitPrice);
+      const err = addItem(product, next.quantity, price !== Number(product.price) ? price : undefined);
+      if (err) notify(`${next.name}: ${err}`);
+    }
+    setQueue(rest);
+  }, [queue]);
+
+
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     setLoading(true);
     (async () => {
       try {
-        const [p, c] = await Promise.all([productsApi.getProducts(), getConfig()]);
+        const [p, c, cust] = await Promise.all([productsApi.getProducts(), getConfig(), customersApi.getCustomers().catch(() => [])]);
         if (cancelled) return;
         setProducts(p);
         setTaxRate(c.taxRate ?? 0);
+        setCustomers(Array.isArray(cust) ? cust : []);
         notify("", "");
       } catch (e) {
         if (!cancelled) notify(`Failed to load: ${e.message}`);
@@ -84,7 +116,7 @@ export default function App() {
 
   function handleNewSale() {
   if (cart.length && !window.confirm("Clear the current sale and start a new one?")) return;
-  clear();
+  resetSale();
   notify("", "");
   setSearchOpen(true);
 }
@@ -92,9 +124,11 @@ export default function App() {
 function handleLogout() {
   logout();
   setUser(null);
-  clear();
+  resetSale();
   setProducts([]);
   setOrders([]);
+  setDrafts([]);
+  setCustomers([]);
   setTab("home");
 }
 
@@ -110,18 +144,30 @@ function handleSearchAdd(product, qty, price) {
   return addItem(product, qty, price);
 }
 
-  async function completeSale() {
-    try {
-      const order = await ordersApi.createOrder(toOrderItems());
-      clear();
-      setPayOpen(false);
-      notify(`Sale completed. Order #${order.id}, total ${money(order.grandTotal)}`, "ok");
-      setProducts(await refresh());
-    } catch (e) {
-      notify(`Order failed: ${e.message}`);
+async function completeSale() {
+  try {
+    let order;
+    if (draftMeta?.id) {
+      await ordersApi.saveDraft(draftMeta.id, {
+        customerName: saleCustomer?.name ?? draftMeta.customerName,
+        customerId: saleCustomer?.id ?? draftMeta.customerId,
+        items: toOrderItems(),
+      });
+      order = await ordersApi.payDraft(draftMeta.id);
+    } else {
+      order = await ordersApi.createOrder(
+        toOrderItems(),
+        saleCustomer ? { customerId: saleCustomer.id, customerName: saleCustomer.name } : {}
+      );
     }
+    resetSale();
+    setPayOpen(false);
+    notify(`Sale completed. Order #${order.id}, total ${money(order.grandTotal)}`, "ok");
+    await refresh();
+  } catch (e) {
+    notify(`Order failed: ${e.message}`);
   }
-
+}
 
   async function loadOrders() {
     try {
@@ -134,7 +180,58 @@ function handleSearchAdd(product, qty, price) {
   function handleTab(next) {
     setTab(next);
     if (next === "orders") loadOrders();
+    if (next === "drafts") loadDrafts();
   }
+
+  async function loadDrafts() {
+  try { setDrafts(await ordersApi.getDrafts()); } catch (e) { notify(e.message); }
+}
+
+function resetSale() {
+  clear();
+  setDraftMeta(null);
+  setSaleCustomer(null);
+}
+
+function handleSelectCustomer(id) {
+  if (id === "__text") return;
+  setSaleCustomer(customers.find((c) => String(c.id) === id) ?? null);
+}
+
+async function handleSaveDraftClick() {
+  if (!cart.length) return notify("Add at least one item before saving a draft");
+  try { setCustomers(await customersApi.getCustomers()); } catch { /* the name can still be typed freely */ }
+  setSaveOpen(true);
+}
+
+async function handleSaveDraft(customerName, customerId) {
+  try {
+    await ordersApi.saveDraft(draftMeta?.id, { customerName, customerId, items: toOrderItems() });
+    resetSale();
+    setSaveOpen(false);
+    notify(`Draft saved for ${customerName}`, "ok");
+    setTab("home");
+  } catch (e) {
+    notify(`Could not save draft: ${e.message}`);
+  }
+}
+
+function handleResume(d) {
+  if (cart.length && !window.confirm("Replace the current sale with this draft?")) return;
+  clear();
+  setDraftMeta({ id: d.id, customerName: d.customerName, customerId: d.customerId });
+  setSaleCustomer({ id: d.customerId ?? null, name: d.customerName });
+  setQueue(d.items.map((i) => ({
+    productId: i.product.id, name: i.product.name, quantity: i.quantity, unitPrice: i.unitPrice,
+  })));
+  notify(`Editing draft for ${d.customerName}`, "ok");
+  setTab("pos");
+}
+
+async function handleDeleteDraft(d) {
+  if (!window.confirm(`Delete the draft for ${d.customerName}?`)) return;
+  try { await ordersApi.deleteDraft(d.id); loadDrafts(); } catch (e) { notify(e.message); }
+}
 
   if (loading) return <div className="loading">Loading…</div>;
 
@@ -156,10 +253,25 @@ function handleSearchAdd(product, qty, price) {
           onInsert={() => setSearchOpen(true)}
           onQty={handleQty}
           onDelete={removeItem}
-          onCancel={clear}
+          onCancel={resetSale}
+          onSaveDraft={handleSaveDraftClick}
           onPay={() => setPayOpen(true)}
+          customer={saleCustomer}
+          customers={customers}
+          onPickCustomer={handleSelectCustomer}
         />
       )}
+      {tab === "drafts" && <DraftsScreen drafts={drafts} onResume={handleResume} onDelete={handleDeleteDraft} />}
+        <SaveDraftDialog
+          open={saveOpen}
+          initialName={saleCustomer?.name ?? draftMeta?.customerName}
+          customers={customers}
+          onSave={handleSaveDraft}
+          onClose={() => setSaveOpen(false)}
+        />
+      {tab === "customers" && <CustomersScreen notify={notify} />}
+      {tab === "business" && <BusinessScreen notify={notify} canEdit={user.role === "MASTER"} />}
+        
       {tab === "stock" && (
         <StockScreen
           products={products}
@@ -180,6 +292,14 @@ function handleSearchAdd(product, qty, price) {
       <PaymentDialog
         open={payOpen} amountDue={totals.grand}
         onClose={() => setPayOpen(false)} onConfirm={completeSale}
+      />
+
+      <CustomerPickerDialog
+        open={pickOpen}
+        customers={customers}
+        current={saleCustomer}
+        onPick={(c) => { setSaleCustomer(c); setPickOpen(false); }}
+        onClose={() => setPickOpen(false)}
       />
     </div>
   );

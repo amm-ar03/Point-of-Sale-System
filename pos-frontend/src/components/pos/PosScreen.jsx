@@ -3,9 +3,11 @@ import { money } from "../../utils/money";
 
 export default function PosScreen({
   cart, selected, setSelected, totals, taxRate,
-  onSku, onNewSale, onInsert, onQty, onDelete, onCancel, onPay,
+  onSku, onNewSale, onInsert, onQty, onDelete, onCancel, onPay, onSaveDraft, customer, customers: customersProp, onPickCustomer,
 }) {
   const [skuSearch, setSkuSearch] = useState("");
+  const customers = Array.isArray(customersProp) ? customersProp : [];
+
 
   async function submit(e) {
     e.preventDefault();
@@ -18,7 +20,24 @@ export default function PosScreen({
   return (
     <section className="screen">
       <header className="panel head">
-        <div className="field"><label>Store</label><div className="box">01 / Demonstration System</div></div>
+        <div className="field-group">
+          <div className="field"><label>Store</label><div className="box">01 / Demonstration System</div></div>
+
+          <label className="field">
+            Customer
+            <select
+              className="cust-select"
+              value={customer ? (customer.id ?? "__text") : ""}
+              onChange={(e) => onPickCustomer(e.target.value)}
+            >
+              <option value="">Walk-in (no customer)</option>
+              {customer && !customer.id && <option value="__text">{customer.name}</option>}
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}{c.phone ? ` · ${c.phone}` : ""}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="mode">CASH SALE<small>Till : 00</small></div>
         <div className="due"><span>DUE</span><strong>{money(totals.grand)}</strong></div>
       </header>
@@ -54,8 +73,8 @@ export default function PosScreen({
             
         <div className="btns">
           <button onClick={onInsert}><u>I</u>nsert</button>
+          <button onClick={onSaveDraft}><u>S</u>ave Draft</button>
           <button className="primary" onClick={onNewSale}>New Sale</button>
-        <button onClick={onInsert}><u>I</u>nsert</button>
           <button disabled={!selected} onClick={() => onQty(selected, 1)}>Qty +</button>
           <button disabled={!selected} onClick={() => onQty(selected, -1)}>Qty −</button>
           <button disabled={!selected} onClick={() => onDelete(selected)}><u>D</u>elete</button>

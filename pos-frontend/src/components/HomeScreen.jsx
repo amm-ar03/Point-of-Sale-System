@@ -19,7 +19,9 @@ export default function HomeScreen({ user, onGo }) {
       <h2>Welcome, {user.username}</h2>
       <div className="hgrid">
         <Card title="New Sale" desc="Open the sale window" onClick={() => onGo("newsale")} />
-        <Card title="Drafts" desc="Saved sales" disabled />
+        <Card title="Drafts" desc="Saved sales" onClick={() => onGo("drafts")} />
+        <Card title="Customers" desc="Customer accounts" onClick={() => onGo("customers")} />
+        <Card title="Business" desc="Business details" onClick={() => onGo("business")} />
 
         <div className="hcard">
           <button className="hcard-btn" onClick={() => setInvOpen((v) => !v)} aria-expanded={invOpen}>

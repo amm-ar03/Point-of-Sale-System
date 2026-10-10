@@ -4,6 +4,9 @@ export default function MenuBar({ tab, onTab, user, onLogout }) {
     ["pos", "Sale"],
     ["stock", "Stock"],
     ["orders", "Orders"],
+    ["drafts", "Drafts"],
+    ["customers", "Customers"],
+    ["business", "Business"],
     ...(user.role === "MASTER" ? [["users", "Users"]] : []),
   ];
   return (
