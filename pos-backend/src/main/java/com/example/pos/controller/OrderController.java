@@ -4,8 +4,8 @@ import com.example.pos.dto.CreateOrderRequest;
 import com.example.pos.model.Order;
 import com.example.pos.repository.OrderRepository;
 import com.example.pos.service.OrderService;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,8 +30,39 @@ public class OrderController {
 
     @GetMapping
     public List<Order> listOrders() {
-        // newest first
-        return orderRepository.findAll(Sort.by(Sort.Direction.DESC, "id"));
+        return orderRepository.findByStatusOrderByIdDesc("PAID");
+    }
+
+    @GetMapping("/drafts")
+    public List<Order> listDrafts() {
+        return orderRepository.findByStatusOrderByIdDesc("DRAFT");
+    }
+
+    @GetMapping("/by-customer/{customerId}")
+    public List<Order> byCustomer(@PathVariable Long customerId) {
+        return orderRepository.findByCustomerIdAndStatusOrderByIdDesc(customerId, "PAID");
+    }
+
+    @PostMapping("/drafts")
+    public ResponseEntity<Order> createDraft(@RequestBody CreateOrderRequest request, Authentication auth) {
+        return ResponseEntity.ok(orderService.saveDraft(null, request, auth.getName()));
+    }
+
+    @PutMapping("/drafts/{id}")
+    public ResponseEntity<Order> updateDraft(@PathVariable Long id, @RequestBody CreateOrderRequest request,
+                                             Authentication auth) {
+        return ResponseEntity.ok(orderService.saveDraft(id, request, auth.getName()));
+    }
+
+    @PostMapping("/drafts/{id}/pay")
+    public ResponseEntity<Order> payDraft(@PathVariable Long id) {
+        return ResponseEntity.ok(orderService.payDraft(id));
+    }
+
+    @DeleteMapping("/drafts/{id}")
+    public ResponseEntity<Void> deleteDraft(@PathVariable Long id) {
+        orderService.deleteDraft(id);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}")

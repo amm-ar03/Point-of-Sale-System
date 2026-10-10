@@ -22,6 +22,10 @@ public class Order {
 
     private String status; // e.g. "PAID"
 
+    private String customerName;
+    private String createdBy;
+    private LocalDateTime updatedAt;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> items = new ArrayList<>();
 
@@ -87,5 +91,38 @@ public class Order {
     public void addItem(OrderItem item) {
         items.add(item);
         item.setOrder(this);
+    }
+
+    public String getCustomerName() {
+         return customerName; 
+    }
+
+    public void setCustomerName(String customerName) {
+        this.customerName = customerName;
+    }
+
+    public String getCreatedBy() {
+        return createdBy;
+    }
+
+    public void setCreatedBy(String createdBy) {
+        this.createdBy = createdBy;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
+    private Long customerId;
+    public Long getCustomerId() {
+         return customerId; 
+    }
+
+    public void setCustomerId(Long customerId) {
+        this.customerId = customerId;
     }
 }

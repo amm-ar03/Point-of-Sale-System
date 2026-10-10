@@ -13,9 +13,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class OrderService {
@@ -36,31 +38,99 @@ public class OrderService {
         return taxRate;
     }
 
-    /**
-     * Creates a paid order atomically: if ANY line fails, the whole transaction rolls back,
-     * so stock is never decremented for an order that doesn't exist.
-     */
     @Transactional
     public Order createOrder(CreateOrderRequest request) {
+        Order order = new Order();
+        order.setCustomerName(clean(request.getCustomerName()));
+        order.setCustomerId(request.getCustomerId());
+        fill(order, request, true);
+        order.setStatus("PAID");
+        return orderRepository.save(order);
+    }
+
+    @Transactional
+    public Order saveDraft(Long id, CreateOrderRequest request, String username) {
+        String name = clean(request.getCustomerName());
+        if (name == null) {
+            throw new OrderException("Customer name is required for a draft");
+        }
+        Order order;
+        if (id == null) {
+            order = new Order();
+            order.setStatus("DRAFT");
+            order.setCreatedBy(username);
+        } else {
+            order = findDraft(id);
+        }
+        order.setCustomerName(name);
+        order.setCustomerId(request.getCustomerId());
+        fill(order, request, false);
+        order.setUpdatedAt(LocalDateTime.now());
+        return orderRepository.save(order);
+    }
+
+    @Transactional
+    public Order payDraft(Long id) {
+        Order order = findDraft(id);
+
+        List<CreateOrderItemRequest> lines = new ArrayList<>();
+        for (OrderItem i : order.getItems()) {
+            CreateOrderItemRequest l = new CreateOrderItemRequest();
+            l.setProductId(i.getProduct().getId());
+            l.setQuantity(i.getQuantity());
+            l.setUnitPrice(i.getUnitPrice());
+            lines.add(l);
+        }
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setItems(lines);
+
+        fill(order, req, true);
+        order.setStatus("PAID");
+        order.setCreatedAt(LocalDateTime.now());
+        order.setUpdatedAt(LocalDateTime.now());
+        return orderRepository.save(order);
+    }
+
+    @Transactional
+    public void deleteDraft(Long id) {
+        orderRepository.delete(findDraft(id));
+    }
+
+    private Order findDraft(Long id) {
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new OrderException("Draft not found: id=" + id));
+        if (!"DRAFT".equals(order.getStatus())) {
+            throw new OrderException("Order #" + id + " is not a draft");
+        }
+        return order;
+    }
+
+    private String clean(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
+    }
+
+    private void fill(Order order, CreateOrderRequest request, boolean deductStock) {
         if (request.getItems() == null || request.getItems().isEmpty()) {
             throw new OrderException("Order must contain at least one item");
         }
 
-        // Lock products in a fixed (id) order so two concurrent sales can't deadlock each other
         List<CreateOrderItemRequest> lines = new ArrayList<>(request.getItems());
         lines.sort(Comparator.comparing(CreateOrderItemRequest::getProductId,
                 Comparator.nullsFirst(Comparator.naturalOrder())));
 
-        Order order = new Order();
+        order.getItems().clear();
         BigDecimal netTotal = BigDecimal.ZERO;
         BigDecimal taxableTotal = BigDecimal.ZERO;
 
         for (CreateOrderItemRequest req : lines) {
             if (req.getProductId() == null) {
-                throw new OrderException("Each item needs a productId");
+                throw new OrderException("Each item needs a Product ID");
             }
 
-            Product product = productRepository.findByIdForUpdate(req.getProductId())
+            Optional<Product> found = deductStock
+                    ? productRepository.findByIdForUpdate(req.getProductId())
+                    : productRepository.findById(req.getProductId());
+            Product product = found
                     .filter(Product::isActive)
                     .orElseThrow(() -> new OrderException("Product not found: id=" + req.getProductId()));
 
@@ -70,13 +140,11 @@ public class OrderService {
             }
 
             int stock = product.getStockQuantity() == null ? 0 : product.getStockQuantity();
-            if (stock < quantity) {
+            if (deductStock && stock < quantity) {
                 throw new OrderException("Not enough stock for " + product.getName()
                         + " (on hand: " + stock + ", requested: " + quantity + ")");
             }
 
-            // The catalogue price is used unless the client explicitly overrides it (must be > 0).
-            // TODO: once users/roles exist, only allow overrides for managers.
             BigDecimal unitPrice;
             if (req.getUnitPrice() != null) {
                 if (req.getUnitPrice().signum() <= 0) {
@@ -91,7 +159,6 @@ public class OrderService {
             }
             unitPrice = unitPrice.setScale(2, RoundingMode.HALF_UP);
 
-            // Tax-exempt status comes from the product record only, never from the client
             boolean taxExempt = Boolean.TRUE.equals(product.getTaxExempt());
 
             OrderItem item = new OrderItem(product, quantity, unitPrice, taxExempt);
@@ -102,15 +169,14 @@ public class OrderService {
                 taxableTotal = taxableTotal.add(item.getLineTotal());
             }
 
-            // product is a managed entity: this change is written when the transaction commits
-            product.setStockQuantity(stock - quantity);
+            if (deductStock) {
+                product.setStockQuantity(stock - quantity);
+            }
         }
 
         BigDecimal taxAmount = taxableTotal.multiply(taxRate).setScale(2, RoundingMode.HALF_UP);
         order.setNetTotal(netTotal);
         order.setTaxAmount(taxAmount);
         order.setGrandTotal(netTotal.add(taxAmount));
-
-        return orderRepository.save(order);
     }
 }
